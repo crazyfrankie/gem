@@ -67,13 +67,13 @@ func (c *Context) String(code int, format string, values ...any) {
 }
 
 // JSON render a json to client
-func (c *Context) JSON(code int, obj H) {
+func (c *Context) JSON(code int, obj any) {
 	c.SetHeader("Content-Type", "application/json")
 	c.Status(code)
 	encoder := json.NewEncoder(c.Writer)
 	err := encoder.Encode(obj)
 	if err != nil {
-		http.Error(c.Writer, err.Error(), 500)
+		panic(err)
 	}
 }
 
