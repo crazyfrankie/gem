@@ -56,15 +56,19 @@ func (b *BizError) BizExtra() map[string]string {
 	return b.extra
 }
 
-func (b *BizError) SetBizExtra(key, val string) {
+func (b *BizError) SetBizExtra(key, val string) *BizError {
 	if b.extra == nil {
 		b.extra = make(map[string]string)
 	}
 	b.extra[key] = val
+
+	return b
 }
 
-func (b *BizError) AppendBizMessage(extraMsg string) {
+func (b *BizError) AppendBizMessage(extraMsg string) *BizError {
 	if b.msg != "" {
 		b.msg = fmt.Sprintf("%s %s", b.msg, extraMsg)
 	}
+
+	return b
 }
