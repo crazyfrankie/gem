@@ -2,6 +2,8 @@ package gem
 
 import (
 	"path"
+	"reflect"
+	"runtime"
 )
 
 // H is a shortcut for map[string]any
@@ -30,4 +32,8 @@ func assert(guard bool, text string) {
 	if !guard {
 		panic(text)
 	}
+}
+
+func nameOfFunction(f any) string {
+	return runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
 }

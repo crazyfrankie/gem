@@ -14,7 +14,7 @@ var jsonContentType = []string{"application/json; charset=utf-8"}
 
 // Render (JSON) writes data with custom ContentType.
 func (j JSON) Render(writer http.ResponseWriter) error {
-	j.WriteContentType(writer)
+	writeContentType(writer, jsonContentType)
 
 	bytes, err := json.Marshal(j.Data)
 	if err != nil {

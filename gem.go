@@ -8,12 +8,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/crazyfrankie/gem/render"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
+
+const escapedColon = "\\:"
+const colon = ":"
+const backslash = "\\"
 
 type HandlerFunc func(*Context)
 
@@ -27,15 +34,25 @@ type Server struct {
 	// Context pool
 	ctxPool sync.Pool
 
-	maxParams   uint16
-	maxSections uint16
-
-	// ContextWithFallback enable fallback Context.Deadline(), Context.Done(), Context.Err() and Context.Value() when Context.Request.Context() is not nil.
-	ContextWithFallback bool
-
 	// Render
 	delims     render.Delims
 	HTMLRender render.HTMLRender
+
+	// UnescapePathValues if true, the path value will be unescaped.
+	// If UseRawPath is false (by default), the UnescapePathValues effectively is true,
+	// as url.Path gonna be used, which is already unescaped.
+	UnescapePathValues bool
+
+	// UseRawPath if enabled, the url.RawPath will be used to find parameters.
+	UseRawPath bool
+
+	// UseH2C enable h2c support.
+	UseH2C bool
+
+	// ContextWithFallback enable fallback Context.Deadline(), Context.Done(), Context.Err() and Context.Value() when Context.Request.Context() is not nil.
+	ContextWithFallback bool
+	maxParams           uint16
+	maxSections         uint16
 }
 
 func New() *Server {
@@ -45,8 +62,10 @@ func New() *Server {
 			basePath: "/",
 			root:     true,
 		},
-		trees:  make(methodTrees, 0, 9),
-		delims: render.Delims{Left: "{{", Right: "}}"},
+		trees:              make(methodTrees, 0, 9),
+		delims:             render.Delims{Left: "{{", Right: "}}"},
+		UseRawPath:         false,
+		UnescapePathValues: true,
 	}
 	server.RouterGroup.server = server
 	server.ctxPool.New = func() any {
@@ -64,7 +83,8 @@ func Default() *Server {
 
 func (server *Server) allocateContext(maxParams uint16) *Context {
 	v := make(Params, 0, maxParams)
-	return &Context{server: server, params: &v}
+	skippedNodes := make([]skippedNode, 0, server.maxSections)
+	return &Context{server: server, params: &v, skippedNodes: &skippedNodes}
 }
 
 // Use Register the middleware in the root path like "/"
@@ -80,7 +100,37 @@ func (server *Server) Delims(left, right string) *Server {
 	return server
 }
 
+func (server *Server) Handler() http.Handler {
+	if !server.UseH2C {
+		return server
+	}
+
+	h2s := &http2.Server{}
+	return h2c.NewHandler(server, h2s)
+}
+
+// updateRouteTree do update to the route tree recursively
+func updateRouteTree(n *node) {
+	n.path = strings.ReplaceAll(n.path, escapedColon, colon)
+	n.fullPath = strings.ReplaceAll(n.fullPath, escapedColon, colon)
+	n.indices = strings.ReplaceAll(n.indices, backslash, colon)
+	if n.children == nil {
+		return
+	}
+	for _, child := range n.children {
+		updateRouteTree(child)
+	}
+}
+
+// updateRouteTrees do update to the route trees
+func (server *Server) updateRouteTrees() {
+	for _, tree := range server.trees {
+		updateRouteTree(tree.root)
+	}
+}
+
 func (server *Server) Start(addr string) error {
+	server.updateRouteTrees()
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Failed to start listener: %v", err)
@@ -127,6 +177,7 @@ func (server *Server) Start(addr string) error {
 
 func (server *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	ctx := server.ctxPool.Get().(*Context)
+	ctx.writemem.reset(writer)
 	ctx.Request = request
 	// Ensure that the context of the current request is clean
 	ctx.reset()
@@ -148,10 +199,49 @@ func (server *Server) addRoute(method string, path string, handlers HandlersChai
 
 	root := server.trees.get(method)
 	if root == nil {
+		root = new(node)
+		root.fullPath = "/"
+		server.trees = append(server.trees, methodTree{method: method, root: root})
+	}
+	root.addRoute(path, handlers)
 
+	if countParams := countParams(path); countParams > server.maxParams {
+		server.maxParams = countParams
+	}
+
+	if countSections := countSections(path); countSections > server.maxSections {
+		server.maxSections = countSections
 	}
 }
 
 func (server *Server) handleHTTPRequest(ctx *Context) {
+	httpMethod := ctx.Request.Method
+	path := ctx.Request.URL.Path
+	unescape := false
 
+	if server.UseRawPath && len(ctx.Request.URL.RawPath) > 0 {
+		path = ctx.Request.URL.RawPath
+		unescape = server.UnescapePathValues
+	}
+
+	// Find Route
+	tree := server.trees
+	for i, tl := 0, len(tree); i < tl; i++ {
+		if tree[i].method != httpMethod {
+			continue
+		}
+		root := tree[i].root
+		// Find route in tree
+		value := root.getValue(path, ctx.params, ctx.skippedNodes, unescape)
+		if value.params != nil {
+			ctx.Params = *value.params
+		}
+		if value.handlers != nil {
+			ctx.handlers = value.handlers
+			ctx.fullPath = value.fullPath
+			ctx.Next()
+			ctx.writemem.WriteHeaderNow()
+			return
+		}
+	}
 }

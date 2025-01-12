@@ -1,7 +1,6 @@
 package gem
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -10,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crazyfrankie/gem/binding"
 	"github.com/crazyfrankie/gem/render"
 )
 
@@ -28,14 +28,16 @@ type Context struct {
 	Request  *http.Request
 	Writer   ResponseWriter
 
-	Params   Params
 	index    int8
-	Handlers HandlersChain
+	fullPath string
+	Params   Params
+	handlers HandlersChain
 	// This mutex protects Keys map.
 	mu sync.RWMutex
 
-	server *Server
-	params *Params
+	server       *Server
+	params       *Params
+	skippedNodes *[]skippedNode
 
 	// Keys is a key/value pair exclusively for the context of each request.
 	Keys map[string]any
@@ -52,29 +54,55 @@ type Context struct {
 // each HTTP request to ensure that the
 // currently requested context is clean
 func (c *Context) reset() {
+	c.Writer = &c.writemem
+	c.Params = c.Params[:0]
+	c.handlers = nil
+	c.index = -1
 
+	c.fullPath = ""
+	c.Keys = nil
+	c.queryCache = nil
+	*c.params = (*c.params)[:0]
+	*c.skippedNodes = (*c.skippedNodes)[:0]
 }
 
-/************************************/
-/*********** FLOW CONTROL ***********/
-/************************************/
+// Copy returns a copy of the current context that can be safely used outside the request's scope.
+// This has to be used when the context has to be passed to a goroutine.
+func (c *Context) copy() *Context {
+	ctx := &Context{
+		writemem: c.writemem,
+		Writer:   c.Writer,
+		server:   c.server,
+	}
 
-func (c *Context) Next() {
-	c.index++
+	ctx.writemem.ResponseWriter = nil
+	ctx.Writer = &c.writemem
+	ctx.index = abortIndex
+	ctx.handlers = nil
+	ctx.fullPath = c.fullPath
+
+	cKeys := c.Keys
+	ctx.Keys = make(map[string]any, len(cKeys))
+	c.mu.RLock()
+	for k, v := range c.Keys {
+		ctx.Keys[k] = v
+	}
+	c.mu.RUnlock()
+
+	return ctx
 }
 
-func (c *Context) IsAborted() bool {
-	return c.index >= abortIndex
-}
-
-func (c *Context) Abort() {
-	c.index = abortIndex
-}
-
-func (c *Context) AbortWithStatus(status int) {
-	c.Status(status)
-	c.Writer.WriteHeaderNow()
-	c.Abort()
+// HandlerNames returns a list of all registered handlers for this context in descending order,
+// following the semantics of HandlerName()
+func (c *Context) HandlerNames() []string {
+	hn := make([]string, 0, len(c.handlers))
+	for _, val := range c.handlers {
+		if val == nil {
+			continue
+		}
+		hn = append(hn, nameOfFunction(val))
+	}
+	return hn
 }
 
 /***************************************/
@@ -106,6 +134,57 @@ func (c *Context) MustGet(key string) any {
 		return value
 	}
 	panic("Key \"" + key + "\" does not exist")
+}
+
+// FullPath returns a matched route full path.
+// For not found routes returns an empty string.
+func (c *Context) FullPath() string {
+	return c.fullPath
+}
+
+/************************************/
+/*********** FLOW CONTROL  **********/
+/************************************/
+
+// Next should be used only inside middleware.
+// It executes the pending handlers in the chain inside the calling handler.
+func (c *Context) Next() {
+	c.index++
+	for c.index < int8(len(c.handlers)) {
+		if c.handlers[c.index] != nil {
+			c.handlers[c.index](c)
+		}
+		c.index++
+	}
+}
+
+// Abort prevents pending handlers from being called. Note that this will not stop the current handler.
+// Let's say you have an authorization middleware that validates that the current request is authorized.
+// If the authorization fails (ex: the password does not match), call Abort to ensure the remaining handlers
+// for this request are not called.
+func (c *Context) Abort() {
+	c.index = abortIndex
+}
+
+// IsAborted returns true if the current context was aborted.
+func (c *Context) IsAborted() bool {
+	return c.index >= abortIndex
+}
+
+// AbortWithStatus calls `Abort()` and writes the headers with the specified status code.
+// For example, a failed attempt to authenticate a request could use: context.AbortWithStatus(401).
+func (c *Context) AbortWithStatus(status int) {
+	c.Status(status)
+	c.Writer.WriteHeaderNow()
+	c.Abort()
+}
+
+// AbortWithJSON calls `Abort()` and then `JSON` internally.
+// This method stops the chain, writes the status code and return a JSON body.
+// It also sets the Content-Type as "application/json".
+func (c *Context) AbortWithJSON(status int, obj any) {
+	c.Abort()
+	c.JSON(status, obj)
 }
 
 /************************************/
@@ -172,40 +251,56 @@ func (c *Context) GetRawData() ([]byte, error) {
 // While Query Header data may need to be handled differently in different scenarios: it may be taken singly,
 // or it may be bound to a structure.
 
-// BindJSON binds json data to a structure.
-func (c *Context) BindJSON(obj any) error {
-	if c.Request == nil || c.Request.Body == nil {
-		return errors.New("invalid request")
+// MustBind binds the passed struct pointer using the specified binding engine.
+// It will abort the request with HTTP 400 if any error occurs.
+// See the binding package.
+func (c *Context) MustBind(obj any, bind binding.Binding) error {
+	if err := bind.Bind(c.Request, obj); err != nil {
+		c.AbortWithStatus(http.StatusBadRequest)
+		return err
 	}
 
-	decoder := json.NewDecoder(c.Request.Body)
-	return decoder.Decode(obj)
+	return nil
+}
+
+// BindJSON binds json data to a structure.
+func (c *Context) BindJSON(obj any) error {
+	return c.MustBind(obj, binding.JSON)
 }
 
 // BindPlain binds
-//func (c *Context) BindPlain(obj any) error {
-//
-//}
-//
-//func (c *Context) BindYAML(obj any) error {
-//
-//}
-//
-//func (c *Context) BindXML(obj any) error {
-//
-//}
-//
-//func (c *Context) BindQuery(obj any) error {
-//
-//}
-//
-//func (c *Context) BindHeader(obj any) error {
-//
-//}
-//
-//func (c *Context) BindUri(obj any) error {
-//
-//}
+func (c *Context) BindPlain(obj any) error {
+	return c.MustBind(obj, binding.PLAIN)
+}
+
+func (c *Context) BindYAML(obj any) error {
+	return c.MustBind(obj, binding.YAML)
+}
+
+func (c *Context) BindXML(obj any) error {
+	return c.MustBind(obj, binding.XML)
+}
+
+func (c *Context) BindQuery(obj any) error {
+	return c.MustBind(obj, binding.Query)
+}
+
+func (c *Context) BindHeader(obj any) error {
+	return c.MustBind(obj, binding.Header)
+}
+
+func (c *Context) BindUri(obj any) error {
+	m := make(map[string][]string, len(c.Params))
+	for _, v := range c.Params {
+		m[v.Key] = []string{v.Value}
+	}
+	if err := binding.Uri.BindingUri(m, obj); err != nil {
+		c.AbortWithStatus(http.StatusBadRequest)
+		return err
+	}
+
+	return nil
+}
 
 /*************************/
 /***** RESPONSE INFO ******/
@@ -249,10 +344,7 @@ func (c *Context) Render(code int, r render.Render) {
 	}
 
 	if err := r.Render(c.Writer); err != nil {
-		// TODO
-		// Pushing error to c.Errors
-		//_ = c.Error(err)
-		//c.Abort()
+		c.Abort()
 	}
 }
 
