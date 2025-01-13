@@ -13,9 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/crazyfrankie/gem/render"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	"github.com/crazyfrankie/gem/render"
 )
 
 const escapedColon = "\\:"
@@ -77,7 +78,7 @@ func New() *Server {
 
 func Default() *Server {
 	server := New()
-	server.Use()
+	server.Use(Recovery())
 	return server
 }
 
