@@ -146,6 +146,7 @@ func (server *Server) Start(addr string) error {
 			log.Fatalf("Failed to serve HTTP: %v", err)
 		}
 	}()
+	log.Printf("Server is running address: http://localhost%s\n", addr)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
