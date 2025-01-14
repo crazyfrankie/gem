@@ -1,8 +1,7 @@
-package trace
+package gem
 
 import (
 	"fmt"
-	"github.com/crazyfrankie/gem"
 	"net/http"
 
 	"go.opentelemetry.io/otel"
@@ -12,14 +11,14 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/crazyfrankie/gem/internal/middleware/trace/traceconv"
+	"github.com/crazyfrankie/gem/internal/traceconv"
 )
 
 const (
 	// traceKey is used to set the tracer's key in context.
 	traceKey = "otel-contrib-go-tracer"
 
-	// scopeName is the trace middleware scope name
+	// scopeName is the traceconv middleware scope name
 	scopeName = "go.opentelemetry.io/contrib/instrumentation/github.com/crazyfrankie/gem/otelgem"
 )
 
@@ -87,7 +86,7 @@ func (t TraceBuilder) SetStatusCode(status int) (codes.Code, string) {
 	return codes.Unset, ""
 }
 
-func (t TraceBuilder) Trace(service string) gem.HandlerFunc {
+func (t TraceBuilder) Trace(service string) HandlerFunc {
 	if t.httpconv == nil {
 		t.httpconv = traceconv.NewHttpConv()
 	}
@@ -101,7 +100,7 @@ func (t TraceBuilder) Trace(service string) gem.HandlerFunc {
 	if t.Propagations == nil {
 		t.Propagations = otel.GetTextMapPropagator()
 	}
-	return func(c *gem.Context) {
+	return func(c *Context) {
 		c.Set(traceKey, t.TraceProvider)
 
 		// Get current context
@@ -129,7 +128,7 @@ func (t TraceBuilder) Trace(service string) gem.HandlerFunc {
 		ctx, span := tracer.Start(c, spanName, opts...)
 		defer span.End()
 
-		// Set the updated ctx back to the request context to ensure that the trace information
+		// Set the updated ctx back to the request context to ensure that the traceconv information
 		// is accessible for subsequent processing
 		c.Request = c.Request.WithContext(ctx)
 

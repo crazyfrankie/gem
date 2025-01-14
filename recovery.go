@@ -88,7 +88,7 @@ func stack(skip int) []byte {
 
 // source returns a space-trimmed slice of the n'th line.
 func source(lines [][]byte, n int) []byte {
-	n-- // in stack trace, lines are 1-indexed but our array is 0-indexed
+	n-- // in stack traceconv, lines are 1-indexed but our array is 0-indexed
 	if n < 0 || n >= len(lines) {
 		return dunno
 	}

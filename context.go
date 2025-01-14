@@ -364,12 +364,6 @@ func (c *Context) Data(code int, contentType string, data []byte) {
 	c.Render(code, render.Data{ContentType: contentType, Data: data})
 }
 
-// HTML render a html to client
-func (c *Context) HTML(code int, name string, obj any) {
-	instance := c.server.HTMLRender.Instance(name, obj)
-	c.Render(code, instance)
-}
-
 // ProtoBuf serializes the given struct as ProtoBuf into the response body.\
 func (c *Context) ProtoBuf(code int, data any) {
 	c.Render(code, render.ProtoBuf{Data: data})

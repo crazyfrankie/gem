@@ -15,8 +15,6 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
-
-	"github.com/crazyfrankie/gem/render"
 )
 
 const escapedColon = "\\:"
@@ -34,10 +32,6 @@ type Server struct {
 
 	// Context pool
 	ctxPool sync.Pool
-
-	// Render
-	delims     render.Delims
-	HTMLRender render.HTMLRender
 
 	// UnescapePathValues if true, the path value will be unescaped.
 	// If UseRawPath is false (by default), the UnescapePathValues effectively is true,
@@ -64,7 +58,6 @@ func New() *Server {
 			root:     true,
 		},
 		trees:              make(methodTrees, 0, 9),
-		delims:             render.Delims{Left: "{{", Right: "}}"},
 		UseRawPath:         false,
 		UnescapePathValues: true,
 	}
@@ -92,12 +85,6 @@ func (server *Server) allocateContext(maxParams uint16) *Context {
 func (server *Server) Use(middleware ...HandlerFunc) Routes {
 	server.RouterGroup.Use(middleware...)
 
-	return server
-}
-
-// Delims sets template left and right delims and returns an Engine instance.
-func (server *Server) Delims(left, right string) *Server {
-	server.delims = render.Delims{Left: left, Right: right}
 	return server
 }
 
