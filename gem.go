@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	"github.com/crazyfrankie/gem/config"
 )
 
 const escapedColon = "\\:"
@@ -33,16 +35,8 @@ type Server struct {
 	// Context pool
 	ctxPool sync.Pool
 
-	// UnescapePathValues if true, the path value will be unescaped.
-	// If UseRawPath is false (by default), the UnescapePathValues effectively is true,
-	// as url.Path gonna be used, which is already unescaped.
-	UnescapePathValues bool
-
-	// UseRawPath if enabled, the url.RawPath will be used to find parameters.
-	UseRawPath bool
-
-	// UseH2C enable h2c support.
-	UseH2C bool
+	// config Options
+	options *config.Options
 
 	// ContextWithFallback enable fallback Context.Deadline(), Context.Done(), Context.Err() and Context.Value() when Context.Request.Context() is not nil.
 	ContextWithFallback bool
@@ -50,16 +44,16 @@ type Server struct {
 	maxSections         uint16
 }
 
-func New() *Server {
+func New(opts ...config.Option) *Server {
+	options := config.NewOptions(opts)
 	server := &Server{
 		RouterGroup: RouterGroup{
 			Handlers: nil,
 			basePath: "/",
 			root:     true,
 		},
-		trees:              make(methodTrees, 0, 9),
-		UseRawPath:         false,
-		UnescapePathValues: true,
+		trees:   make(methodTrees, 0, 9),
+		options: options,
 	}
 	server.RouterGroup.server = server
 	server.ctxPool.New = func() any {
@@ -69,8 +63,8 @@ func New() *Server {
 	return server
 }
 
-func Default() *Server {
-	server := New()
+func Default(opts ...config.Option) *Server {
+	server := New(opts...)
 	server.Use(Recovery())
 	return server
 }
@@ -89,7 +83,7 @@ func (server *Server) Use(middleware ...HandlerFunc) Routes {
 }
 
 func (server *Server) Handler() http.Handler {
-	if !server.UseH2C {
+	if !server.options.H2C {
 		return server
 	}
 
@@ -208,9 +202,9 @@ func (server *Server) handleHTTPRequest(ctx *Context) {
 	path := ctx.Request.URL.Path
 	unescape := false
 
-	if server.UseRawPath && len(ctx.Request.URL.RawPath) > 0 {
+	if server.options.UseRawPath && len(ctx.Request.URL.RawPath) > 0 {
 		path = ctx.Request.URL.RawPath
-		unescape = server.UnescapePathValues
+		unescape = server.options.UnescapePathValues
 	}
 
 	// Find Route
