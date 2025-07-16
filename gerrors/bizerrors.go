@@ -28,7 +28,7 @@ func FromBizStatusError(err error) (bizErr BizErrorIface, ok bool) {
 }
 
 // NewBizError returns BizErrorIface by passing code and msg.
-func NewBizError(code int32, msg string) BizErrorIface {
+func NewBizError(code int32, msg string) *BizError {
 	return &BizError{
 		code: code,
 		msg:  msg,
@@ -36,7 +36,7 @@ func NewBizError(code int32, msg string) BizErrorIface {
 }
 
 // NewBizErrorWithExtra returns BizErrorIface which contains extra info.
-func NewBizErrorWithExtra(code int32, msg string, extra map[string]string) BizErrorIface {
+func NewBizErrorWithExtra(code int32, msg string, extra map[string]string) *BizError {
 	return &BizError{code: code, msg: msg, extra: extra}
 }
 
