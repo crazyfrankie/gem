@@ -30,8 +30,9 @@ func FromBizStatusError(err error) (bizErr BizErrorIface, ok bool) {
 // NewBizError returns BizErrorIface by passing code and msg.
 func NewBizError(code int32, msg string) *BizError {
 	return &BizError{
-		code: code,
-		msg:  msg,
+		code:  code,
+		msg:   msg,
+		extra: make(map[string]string),
 	}
 }
 
@@ -57,18 +58,26 @@ func (b *BizError) BizExtra() map[string]string {
 }
 
 func (b *BizError) SetBizExtra(key, val string) *BizError {
-	if b.extra == nil {
-		b.extra = make(map[string]string)
-	}
-	b.extra[key] = val
+	newErr := *b
 
-	return b
+	newExtra := make(map[string]string)
+	for k, v := range b.extra {
+		newExtra[k] = v
+	}
+	newExtra[key] = val
+
+	newErr.extra = newExtra
+	return &newErr
 }
 
-func (b *BizError) AppendBizMessage(extraMsg string) *BizError {
-	if b.msg != "" {
-		b.msg = fmt.Sprintf("%s %s", b.msg, extraMsg)
+func (b *BizError) AppendBizMessage(err error) *BizError {
+	if err == nil {
+		return b
 	}
 
-	return b
+	return &BizError{
+		code:  b.code,
+		msg:   fmt.Sprintf("%s, %s", b.msg, err.Error()),
+		extra: b.extra,
+	}
 }
